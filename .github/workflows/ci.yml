@@ -1,0 +1,71 @@
+name: CI (smoke)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            posts/polars-migration/demo/requirements.txt
+            posts/sklearn-pipelines/demo/requirements.txt
+            posts/duckdb-over-parquet/duckdb-lakehouse/requirements.txt
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      # ---- Polars demo ----
+      - name: Polars demo deps
+        run: |
+          pip install -r posts/polars-migration/demo/requirements.txt
+          pip install pandas numpy
+      - name: Polars demo run
+        working-directory: posts/polars-migration/demo
+        run: |
+          python make_data.py
+          python pipeline_polars.py
+          test -f out/by_user.parquet
+
+      # ---- sklearn demo ----
+      - name: sklearn demo deps
+        run: pip install -r posts/sklearn-pipelines/demo/requirements.txt
+      - name: sklearn train+score
+        working-directory: posts/sklearn-pipelines/demo
+        run: |
+          python src/train.py
+          python src/score.py
+          test -f artifacts/model.joblib
+          test -f out/preds.csv
+
+      # ---- DuckDB lakehouse demo ----
+      - name: DuckDB demo deps
+        run: pip install -r posts/duckdb-over-parquet/duckdb-lakehouse/requirements.txt
+      - name: DuckDB generate data
+        working-directory: posts/duckdb-over-parquet/duckdb-lakehouse
+        run: python scripts/generate_data.py
+      - name: DuckDB run query
+        working-directory: posts/duckdb-over-parquet/duckdb-lakehouse
+        run: |
+          python scripts/run_query.py --start 2025-10-01 --end 2025-10-01
+          test -f out/daily_fact.parquet

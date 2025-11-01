@@ -1,1 +1,578 @@
-<p>(Article to be added)</p>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Migrating from pandas to polars: a field guide</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+        line-height: 1.6;
+        margin: 0;
+        padding: 0;
+      }
+      .container {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 28px 18px;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.25;
+        margin-top: 1.6em;
+      }
+      h1 {
+        font-size: 2rem;
+      }
+      h2 {
+        font-size: 1.5rem;
+      }
+      h3 {
+        font-size: 1.25rem;
+      }
+      p {
+        margin: 1em 0;
+      }
+      ul,
+      ol {
+        padding-left: 1.25em;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+      }
+      pre {
+        background: #054212;
+        color: #e5e7eb;
+        padding: 14px;
+        overflow: auto;
+        border-radius: 8px;
+        border: 1px solid #0c5c2c;
+      }
+      pre code {
+        background: transparent;
+        color: inherit;
+        padding: 0;
+      }
+      code {
+        background: #edecbb;
+        color: #285c91;
+        padding: 0.2em 0.4em;
+        border-radius: 4px;
+      }
+      a {
+        color: #0366d6;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1em 0;
+      }
+      th,
+      td {
+        border: 1px solid #eaecef;
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f6f8fa;
+      }
+      blockquote {
+        border-left: 4px solid #eaecef;
+        margin: 1em 0;
+        padding: 0.5em 1em;
+        color: #6a737d;
+        background: #fafbfc;
+      }
+      .callout {
+        background: #fef3c7;
+        border: 1px solid #fde68a;
+        padding: 12px 14px;
+        border-radius: 8px;
+      }
+      .hr {
+        height: 1px;
+        background: #eaecef;
+        border: 0;
+        margin: 2em 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Migrating from pandas to polars: a field guide</h1>
+
+      <p>
+        Here's a practical, engineer-to-engineer guide for moving a real codebase from <strong>pandas</strong> to
+        <strong>polars</strong>&mdash;what to expect, where it shines, where it bites, and how to migrate without breaking production dashboards at 6&nbsp;a.m.
+      </p>
+
+      <h2>Why even consider polars?</h2>
+      <ul>
+        <li>
+          <strong>Speed &amp; parallelism.</strong> Polars is built in Rust with vectorized, multi-threaded execution. On wide/large data it's often 2-10x faster than pandas, sometimes more on I/O-bound + compute pipelines.
+        </li>
+        <li>
+          <strong>Memory efficiency.</strong> Columnar engine + Apache Arrow buffers - means: less copying, better cache locality, and a fighting chance with “fits in RAM… barely” datasets.
+        </li>
+        <li>
+          <strong>Lazy evaluation.</strong> You can compose a whole query plan, push filters/projections down to scan level, and only <code>collect()</code> at the edges. This kills a lot of accidental O(N) waste.
+        </li>
+        <li>
+          <strong>Expressions &gt; rows.</strong> The expression API
+          (<code>pl.col</code>, <code>pl.when</code>, window functions, etc.) nudges you to write vectorized, optimizable transforms instead of slow Python loops.
+        </li>
+      </ul>
+
+      <h2>When <em>not</em> to migrate (yet)</h2>
+      <ul>
+        <li>
+          <strong>Heavy row-wise Python UDFs.</strong> If your pipeline leans on <code>apply</code> with complex Python logic that can't be expressed as vector ops, polars won't make that magically fast. Refactor first.
+        </li>
+        <li>
+          <strong>Niche pandas-only ecosystem hooks.</strong> Some libraries (certain plotting backends, bespoke sklearn wrappers, legacy BI adapters) expect pandas DataFrames. Polars can interop (<code>.to_pandas()</code>), but that can become a performance siphon if used frequently.
+        </li>
+        <li>
+          <strong>Time-zone edge cases + obscure dtypes.</strong> Polars has strong datetime support, but if your stack relies on exotic period/freq behaviors or pandas extension dtypes, validate carefully.
+        </li>
+        <li>
+          <strong>You need mutability everywhere.</strong> Polars pushes a more functional style. If you depend on in-place mutation semantics sprinkled across the code, there's a learning curve.
+        </li>
+      </ul>
+
+      <h2>Core mental model shift</h2>
+      <p>
+        <strong>Pandas:</strong> eager, row-oriented feel, Python loops tolerated (until they aren't).<br />
+        <strong>Polars:</strong> expression-driven, columnar, lazy-first mindset. You describe <em>what</em> to compute; the engine plans
+        <em>how</em>.
+      </p>
+
+      <pre><code># pandas
+df['rate'] = df['num'] / df['den']
+df = df[df['rate'] &gt; 0.2]
+
+# polars (eager)
+df = df.with_columns((pl.col('num') / pl.col('den')).alias('rate'))        .filter(pl.col('rate') &gt; 0.2)
+
+# polars (lazy - preferred at scale)
+lf = pl.scan_parquet("events/*.parquet")        .with_columns((pl.col('num') / pl.col('den')).alias('rate'))        .filter(pl.col('rate') &gt; 0.2)
+df = lf.collect()
+</code></pre>
+
+      <h2>Installing &amp; first steps</h2>
+      <pre><code>pip install polars  # cpu default
+# or with extras: pip install 'polars[timezone]'
+</code></pre>
+      <p>
+        <strong>Tip:</strong> Start by importing polars as <code>pl</code> and
+        keep pandas as <code>pd</code> in the same notebook so you can A/B.
+      </p>
+
+      <hr class="hr" />
+
+      <h2>A migration recipe that actually works</h2>
+
+      <h3>0) Draw the box</h3>
+      <p>
+        Pick a pipeline boundary (e.g., “daily fact build”). Don't port
+        everything. Port one flow end-to-end with stable input files and golden
+        outputs.
+      </p>
+
+      <h3>1) Replace I/O first</h3>
+      <p>Use lazy scans so you get predicate/projection pushdown on day one.</p>
+      <pre><code># pandas
+df = pd.read_parquet("s3://bucket/path/*.parquet", columns=['a','b','c'])
+
+# polars
+lf = pl.scan_parquet("s3://bucket/path/*.parquet").select(['a','b','c'])
+</code></pre>
+
+      <p>For CSVs:</p>
+      <pre><code>lf = pl.scan_csv("data/*.csv", infer_schema_length=10000)  # tune inference
+</code></pre>
+
+      <h3>2) Port filters, selects, derived columns</h3>
+      <pre><code>lf = lf.with_columns([
+    (pl.col('revenue') - pl.col('cost')).alias('profit'),
+    pl.when(pl.col('country') == 'US').then('NA').otherwise('ROW').alias('region'),
+    pl.col('timestamp').dt.truncate('1h').alias('hour')
+]).filter(pl.col('profit') &gt; 0)
+</code></pre>
+
+      <h3>3) Group-bys &amp; aggregations</h3>
+      <pre><code># pandas
+out = df.groupby(['hour','region']).agg({'profit':['sum','mean']}).reset_index()
+
+# polars
+out = (lf.group_by(['hour','region'])
+         .agg([
+           pl.col('profit').sum().alias('profit_sum'),
+           pl.col('profit').mean().alias('profit_mean')
+         ])
+         .collect())
+</code></pre>
+
+      <h3>4) Joins</h3>
+      <pre><code>left  = pl.scan_parquet("left/*.parquet")
+right = pl.scan_parquet("right/*.parquet").select(['id','tier'])
+
+out = left.join(right, on='id', how='left').collect()
+</code></pre>
+
+      <p>
+        <strong>Pitfall note:</strong> If both sides have columns with the same name (other than keys), polars suffixes with <code>"_right"</code> by default. Be explicit with <code>.select()</code> before the join to keep the frame tidy.
+      </p>
+
+      <h3>5) Windows instead of groupby-apply</h3>
+      <pre><code># running total per id
+lf = lf.with_columns(
+    pl.col('amount').cumsum().over('id').alias('running_amount')
+)
+</code></pre>
+
+      <h3>6) Only <code>collect()</code> at the edges</h3>
+      <p>
+        Build the whole plan lazily; collect once when you need a concrete result (write, plot, return).
+      </p>
+
+      <hr class="hr" />
+
+      <h2>“I used to do X in pandas. How in polars?”</h2>
+
+      <h3>Filtering, sorting, slicing</h3>
+      <pre><code>lf.filter(pl.col('x') &gt; 0).sort(['ts', 'id']).limit(100)
+</code></pre>
+
+      <h3>Renaming</h3>
+      <pre><code>lf.rename({'old': 'new'})
+</code></pre>
+
+      <h3>String ops</h3>
+      <pre><code>lf.with_columns(
+  pl.col('email').str.to_lowercase().str.split('@').list.get(1).alias('domain')
+)
+</code></pre>
+
+      <h3>Missing data</h3>
+      <pre><code>lf.with_columns(pl.col('score').fill_null(0))
+</code></pre>
+
+      <h3>Explode &amp; structs (handy for nested JSON)</h3>
+      <pre><code>lf = lf.with_columns(pl.col('tags').str.json_decode())        .explode('tags')
+</code></pre>
+
+      <h3>Pivot</h3>
+      <pre><code>lf.group_by('user').pivot('day', values='count').sum()
+</code></pre>
+
+      <h3>Writing out</h3>
+      <pre><code>(lf.collect()
+   .write_parquet("out/metrics.parquet", use_pyarrow=True))
+</code></pre>
+
+      <hr class="hr" />
+
+      <h2>Performance patterns that matter</h2>
+      <ul>
+        <li>
+          <strong
+            >Prefer lazy scans (<code>scan_*</code>) over eager reads
+            (<code>read_*</code>).</strong
+          >
+          This enables:
+          <ul>
+            <li>
+              <strong>Projection pushdown:</strong> only read columns you use.
+            </li>
+            <li><strong>Predicate pushdown:</strong> filter at the source.</li>
+            <li>
+              <strong>Streaming:</strong> for some ops on large files to keep
+              memory steady.
+            </li>
+          </ul>
+        </li>
+        <li>
+          <strong
+            >Compose with <code>select/with_columns/filter</code>&mdash;not
+            loops.</strong
+          >
+          Every loop is a chance to de-vectorize.
+        </li>
+        <li>
+          <strong
+            >Minimize <code>.collect()</code> and
+            <code>.to_pandas()</code> hops.</strong
+          >
+          Crossing language boundaries throws away optimizations.
+        </li>
+        <li>
+          <strong
+            >Use <code>categorical</code>/string cache for repeat joins on
+            string keys.</strong
+          >
+          <pre><code>pl.StringCache()  # context manager, aligns categorical dictionaries
+</code></pre>
+        </li>
+        <li>
+          <strong>Rechunk after heavy appends/concats</strong> to keep columns
+          contiguous:
+          <pre><code>df = df.rechunk()
+</code></pre>
+        </li>
+        <li>
+          <strong>Avoid Python UDFs inside expressions</strong> unless
+          absolutely necessary. If you must, isolate at the edges.
+        </li>
+      </ul>
+
+      <h2>Common pitfalls (and the fixes)</h2>
+      <ol>
+        <li>
+          <strong>Eager vs lazy confusion</strong>
+          <ul>
+            <li>
+              <em>Symptom:</em> You build a lazy plan but accidentally call an
+              eager API midway.
+            </li>
+            <li>
+              <em>Fix:</em> Standardize on <code>LazyFrame</code> until final
+              <code>collect()</code>. Use <code>scan_*</code> and avoid
+              <code>read_*</code> in the pipeline core.
+            </li>
+          </ul>
+        </li>
+        <li>
+          <strong>Reflexive <code>.apply</code> everywhere</strong>
+          <ul>
+            <li><em>Symptom:</em> It “works” but crawls.</li>
+            <li>
+              <em>Fix:</em> Replace with expressions: <code>pl.when</code>,
+              <code>pl.map_elements</code> (still Python!) only as a last
+              resort, or <code>fold</code> for row-wise reductions.
+            </li>
+          </ul>
+        </li>
+        <li>
+          <strong>Type inference surprises</strong>
+          <ul>
+            <li>
+              <em>Symptom:</em> CSV → numeric column inferred as
+              <code>Utf8</code>, joins fail.
+            </li>
+            <li>
+              <em>Fix:</em> Specify schema or cast early:
+              <pre><code>lf = pl.scan_csv(..., dtypes={'id': pl.Int64})
+</code></pre>
+            </li>
+          </ul>
+        </li>
+        <li>
+          <strong>Time zones &amp; truncation gotchas</strong>
+          <ul>
+            <li><em>Symptom:</em> Off-by-one hour after DST.</li>
+            <li>
+              <em>Fix:</em> Use timezone-aware types and explicit conversions:
+              <pre><code>lf = lf.with_columns(pl.col('ts').dt.replace_time_zone('UTC'))
+</code></pre>
+            </li>
+          </ul>
+        </li>
+        <li>
+          <strong>Join column name collisions</strong>
+          <ul>
+            <li><em>Symptom:</em> Unexpected <code>*_right</code> columns.</li>
+            <li>
+              <em>Fix:</em> Pre-select columns on the right or rename before
+              join.
+            </li>
+          </ul>
+        </li>
+        <li>
+          <strong>Window semantics ≠ groupby-apply</strong>
+          <ul>
+            <li>
+              <em>Symptom:</em> Expecting per-group stateful Python logic.
+            </li>
+            <li>
+              <em>Fix:</em> Translate to window expressions
+              (<code>.over()</code>) or multi-stage groupby + joins.
+            </li>
+          </ul>
+        </li>
+        <li>
+          <strong>Assuming stable row order</strong>
+          <ul>
+            <li><em>Symptom:</em> Code relies on implicit order.</li>
+            <li>
+              <em>Fix:</em> Always <code>sort()</code> before positional
+              operations; columnar engines don't guarantee order.
+            </li>
+          </ul>
+        </li>
+        <li>
+          <strong>Streaming not supported for everything</strong>
+          <ul>
+            <li>
+              <em>Symptom:</em> Memory spikes despite
+              <code>streaming=true</code>.
+            </li>
+            <li>
+              <em>Fix:</em> Not all transforms stream. Check plan
+              (<code>.explain()</code>) and restructure (filter earlier, reduce
+              fan-out).
+            </li>
+          </ul>
+        </li>
+      </ol>
+
+      <h2>Testing &amp; confidence building</h2>
+      <pre><code># Golden datasets: freeze inputs/outputs
+# Metric parity first: aggregate stats
+# Explain plans:
+lf.explain(optimized=True)  # sanity-check pushdowns and joins
+
+# Shadow mode: run polars + pandas in parallel before cutover
+</code></pre>
+
+      <h2>Interop tips</h2>
+      <pre><code># Arrow bridge
+tbl = lf.collect().to_arrow()      # to PyArrow
+dfp = lf.collect().to_pandas()     # to pandas (edge only)
+lfd = pl.from_arrow(tbl).lazy()    # from Arrow without copies
+
+# DuckDB + polars together can shine
+</code></pre>
+
+      <h2>A small “pandas → polars” cheat sheet</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Task</th>
+            <th>pandas</th>
+            <th>polars (lazy)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Read parquet</td>
+            <td><code>pd.read_parquet(p)</code></td>
+            <td><code>pl.scan_parquet(p)</code></td>
+          </tr>
+          <tr>
+            <td>Select cols</td>
+            <td><code>df[['a','b']]</code></td>
+            <td><code>.select(['a','b'])</code></td>
+          </tr>
+          <tr>
+            <td>Filter</td>
+            <td><code>df[df.a&gt;0]</code></td>
+            <td><code>.filter(pl.col('a')&gt;0)</code></td>
+          </tr>
+          <tr>
+            <td>New col</td>
+            <td><code>df['c']=df.a+df.b</code></td>
+            <td>
+              <code>.with_columns((pl.col('a')+pl.col('b')).alias('c'))</code>
+            </td>
+          </tr>
+          <tr>
+            <td>Groupby agg</td>
+            <td><code>df.groupby('k')['v'].sum()</code></td>
+            <td><code>.group_by('k').agg(pl.col('v').sum())</code></td>
+          </tr>
+          <tr>
+            <td>Join</td>
+            <td><code>df.merge(df2,on='id',how='left')</code></td>
+            <td><code>.join(df2, on='id', how='left')</code></td>
+          </tr>
+          <tr>
+            <td>Window</td>
+            <td><code>df.sort_values(...).groupby('k').cumsum()</code></td>
+            <td><code>.with_columns(pl.col('v').cumsum().over('k'))</code></td>
+          </tr>
+          <tr>
+            <td>Write parquet</td>
+            <td><code>df.to_parquet(p)</code></td>
+            <td><code>.collect().write_parquet(p)</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Best-practice checklist (short and opinionated)</h2>
+      <ul>
+        <li>
+          Default to <strong>lazy</strong>; <code>collect()</code> only at the
+          boundary.
+        </li>
+        <li>
+          <strong>Scan</strong> files, don't read them, and
+          <strong>select</strong> the columns you need up front.
+        </li>
+        <li>
+          Express logic with <strong>expressions</strong>, not Python loops.
+        </li>
+        <li>
+          Filter <strong>before</strong> joins; project away unused columns as
+          early as possible.
+        </li>
+        <li>
+          Use <strong>categorical/string cache</strong> for repeated joins on
+          strings.
+        </li>
+        <li>
+          Investigate plans with <code>explain()</code>; trust but verify.
+        </li>
+        <li>
+          Keep <strong>interop at the edges</strong>&mdash;if something needs
+          pandas, convert once at the end.
+        </li>
+      </ul>
+
+      <h2>Migration playbook (one sprint)</h2>
+      <ol>
+        <li>
+          <strong>Inventory</strong>: list top 3 pipelines by runtime/memory
+          pain.
+        </li>
+        <li><strong>Golden data</strong>: freeze inputs/outputs.</li>
+        <li>
+          <strong>Port I/O + selections</strong> to lazy scans; run parity
+          tests.
+        </li>
+        <li>
+          <strong>Port transforms</strong> to expressions, remove
+          <code>.apply</code>.
+        </li>
+        <li>
+          <strong>Port aggregations/joins</strong>; add window expressions where
+          needed.
+        </li>
+        <li>
+          <strong>Benchmark</strong>: wall time, peak RSS, and cost (if on
+          cloud).
+        </li>
+        <li><strong>Shadow run</strong> in CI for a week; diff metrics.</li>
+        <li><strong>Cutover</strong>, keep a rollback switch for one cycle.</li>
+      </ol>
+
+      <h2>Final thoughts</h2>
+      <p>
+        Polars rewards you for thinking in columns, not rows; in query plans,
+        not scripts. If you lean into the lazy/expression model, you'll likely
+        get big wins in speed and memory—and simpler, more auditable pipelines.
+        If your workflows are deeply Python-UDF-heavy or depend on
+        pandas-specific quirks, do a targeted refactor first, then switch. That
+        path saves you from a “rewrote everything, gained nothing” outcome.
+      </p>
+    </div>
+  </body>
+</html>

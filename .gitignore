@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.pyo
+*.pdb
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+.envrc
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb~
+
+# OS
+.DS_Store
+
+# Project artifacts
+**/artifacts/
+**/out/
+**/.duckdbtmp/

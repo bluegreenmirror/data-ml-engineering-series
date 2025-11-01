@@ -1,18 +1,452 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>From scikit-learn one-off scripts to production-ish pipelines</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1/themes/prism.css" />
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-core.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/autoloader/prism-autoloader.min.js"></script>
-<script>Prism.plugins.autoloader.languages_path="https://cdn.jsdelivr.net/npm/prismjs@1/components/";</script>
-<style>
-  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;line-height:1.6;margin:0}
-  .container{max-width:860px;margin:0 auto;padding:28px 18px}
-  h1,h2,h3{line-height:1.25;margin-top:1.6em}h1{font-size:2rem}
-  pre{background:#054212;color:#e5e7eb;padding:14px;border-radius:8px;border:1px solid #0c5c2c;overflow:auto}
-  code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;background:#edecbb;color:#285c91;padding:0.2em 0.4em;border-radius:4px}
-</style></head><body><div class="container">
-<h1>From scikit-learn one-off scripts to production-ish pipelines</h1>
-<p>Short version of the article with code samples and your preferred styling + Prism for highlighting.</p>
-<pre><code class="language-python">from sklearn.pipeline import Pipeline
-# ... see repo demo for full code
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>From scikit-learn one-off scripts to production-ish pipelines</title>
+
+  <!-- Your base blog styles -->
+  <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+        line-height: 1.6;
+        margin: 0;
+        padding: 0;
+      }
+      .container {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 28px 18px;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.25;
+        margin-top: 1.6em;
+      }
+      h1 {
+        font-size: 2rem;
+      }
+      h2 {
+        font-size: 1.5rem;
+      }
+      h3 {
+        font-size: 1.25rem;
+      }
+      p {
+        margin: 1em 0;
+      }
+      ul,
+      ol {
+        padding-left: 1.25em;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+      }
+      /* keep your green theme background for code blocks */
+      pre {
+        background: #054212;
+        color: #e5e7eb;
+        padding: 14px;
+        overflow: auto;
+        border-radius: 8px;
+        border: 1px solid #0c5c2c;
+      }
+      pre code {
+        background: transparent;
+        color: inherit;
+        padding: 0;
+        white-space: pre;            /* ensure Prism doesn't wrap weirdly */
+      }
+      code {
+        background: #edecbb;
+        color: #285c91;
+        padding: 0.2em 0.4em;
+        border-radius: 4px;
+      }
+      a {
+        color: #0366d6;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1em 0;
+      }
+      th,
+      td {
+        border: 1px solid #eaecef;
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f6f8fa;
+      }
+      blockquote {
+        border-left: 4px solid #eaecef;
+        margin: 1em 0;
+        padding: 0.5em 1em;
+        color: #6a737d;
+        background: #fafbfc;
+      }
+      .callout {
+        background: #fef3c7;
+        border: 1px solid #fde68a;
+        padding: 12px 14px;
+        border-radius: 8px;
+      }
+      .hr {
+        height: 1px;
+        background: #eaecef;
+        border: 0;
+        margin: 2em 0;
+      }
+
+      /* Optional: align Prism token colors to your dark-green pre background */
+      /* Prism injects token spans; we tint them here while keeping your theme */
+      pre[class*="language-"] { background: #054212; }
+      .token.comment, .token.prolog, .token.doctype, .token.cdata { color: #9bb3a3; }
+      .token.punctuation { color: #d7e9df; }
+      .token.property, .token.tag, .token.constant, .token.symbol, .token.deleted { color: #ffcf99; }
+      .token.boolean, .token.number { color: #ffd966; }
+      .token.selector, .token.attr-name, .token.string, .token.char, .token.builtin, .token.inserted { color: #b1ffd1; }
+      .token.operator, .token.entity, .token.url { color: #e7f5ee; }
+      .token.atrule, .token.attr-value, .token.keyword { color: #7fd3ff; }
+      .token.function, .token.class-name { color: #ffd1f3; }
+      .token.regex, .token.important, .token.variable { color: #f9ffa6; }
+      .token.bold { font-weight: bold; }
+      .token.italic { font-style: italic; }
+  </style>
+
+  <!-- Prism.js lightweight setup: core + Python + Bash + JSON + markup, via CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1/themes/prism.css" />
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/autoloader/prism-autoloader.min.js"></script>
+  <script>
+    /* Autoloader config: load only needed languages */
+    Prism.plugins.autoloader.languages_path = "https://cdn.jsdelivr.net/npm/prismjs@1/components/";
+  </script>
+</head>
+<body>
+  <div class="container">
+    <h1>From scikit-learn one-off scripts to production-ish pipelines</h1>
+    <p>
+      This is a pragmatic guide for upgrading messy, exploratory scikit-learn code into
+      <em>repeatable</em>, <em>leakage-aware</em>, and <em>deployment-ready</em> pipelines.
+      The goal isn’t to build a full MLOps platform&mdash;it’s to get 80% of the wins with
+      clean abstractions you can test, version, and run in CI.
+    </p>
+
+    <div class="callout">
+      <strong>TL;DR</strong>: Put every transform inside a <code>Pipeline</code> or <code>ColumnTransformer</code>,
+      do all tuning inside that pipeline with cross-validation, lock randomness, and persist a single fitted object.
+      Add a tiny CLI for batch inference and a couple of data quality checks. Ship.
+    </div>
+
+    <h2>When to move beyond one-off scripts</h2>
+    <ul>
+      <li>Multiple notebooks are copy-pasting the same preprocessing steps.</li>
+      <li>Metrics bounce between runs because of leakage or uncontrolled randomness.</li>
+      <li>Stakeholders ask for scheduled refreshes or reproducible comparisons.</li>
+      <li>You’re hand-rolling train/test splits and hyper-params outside the model.</li>
+    </ul>
+
+    <h2>When <em>not</em> to (yet)</h2>
+    <ul>
+      <li>You’re still defining the problem / target / metrics. Stay in notebooks.</li>
+      <li>Your data schema churns daily. Stabilize inputs first.</li>
+      <li>The model is destined for a streaming online system—jump straight to the platform you’ll use in prod.</li>
+    </ul>
+
+    <div class="hr"></div>
+
+    <h2>The mental model shift</h2>
+    <p>
+      Instead of manual, step-by-step munging, treat the whole workflow as a single object: a
+      <code>Pipeline</code> that takes raw columns and returns predictions. That object is the unit of
+      training, tuning, persistence, and inference.
+    </p>
+
+<pre><code class="language-python"># anti-pattern (implicit steps, easy leakage)
+X_train = encode(train_df[cats])
+X_train[num_cols] = impute_and_scale(train_df[num_cols])
+model = LogisticRegression().fit(X_train, y_train)
+
+X_test  = encode(test_df[cats])  # not the same encoder!
+X_test[num_cols] = impute_and_scale(test_df[num_cols])  # leakage risk
+preds = model.predict_proba(X_test)[:,1]
+
+# refactor: explicit, composable pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+
+num_cols = ["age","balance"]
+cat_cols = ["segment","region"]
+
+pre = ColumnTransformer([
+    ("num", Pipeline([
+        ("impute", SimpleImputer(strategy="median")),
+        ("scale", StandardScaler())
+    ]), num_cols),
+    ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols),
+])
+
+pipe = Pipeline([
+    ("pre", pre),
+    ("clf", LogisticRegression(max_iter=200, n_jobs=None, random_state=42))
+])
+
+pipe.fit(train_df, y_train)
+preds = pipe.predict_proba(test_df)[:,1]  # same transforms, no leakage
 </code></pre>
-</div></body></html>
+
+    <h2>Data splits that match reality</h2>
+    <p>
+      Always pick a split strategy that mirrors data collection. Random K-Fold is fine for IID tabular;
+      use <code>GroupKFold</code> to avoid user/product leakage, and <code>TimeSeriesSplit</code> for temporal drift.
+    </p>
+
+<pre><code class="language-python">from sklearn.model_selection import GroupKFold, TimeSeriesSplit
+
+# Avoid cross-customer leakage
+gkf = GroupKFold(n_splits=5)
+for tr, va in gkf.split(train_df, y_train, groups=train_df["customer_id"]):
+    pipe.fit(train_df.iloc[tr], y_train.iloc[tr])
+    va_pred = pipe.predict_proba(train_df.iloc[va])[:,1]
+    # compute metrics ...
+
+# Temporal validation
+tscv = TimeSeriesSplit(n_splits=5)
+</code></pre>
+
+    <h2>Hyperparameter search inside the pipeline</h2>
+    <p>
+      Tune the estimator <em>and</em> preprocessing jointly so CV sees the same transforms the model will get in prod.
+      Start with <code>RandomizedSearchCV</code> for breadth; graduate to <code>HalvingRandomSearchCV</code> or Bayesian tools later.
+    </p>
+
+<pre><code class="language-python">from sklearn.model_selection import RandomizedSearchCV
+from scipy.stats import loguniform
+
+param_space = {
+    "clf__C": loguniform(1e-3, 10),
+    "clf__penalty": ["l2"],
+    "clf__solver": ["liblinear","lbfgs"],
+    "pre__num__impute__strategy": ["median","most_frequent"],
+}
+
+search = RandomizedSearchCV(
+    estimator=pipe,
+    param_distributions=param_space,
+    n_iter=40,
+    scoring="roc_auc",
+    cv=gkf,
+    n_jobs=-1,
+    random_state=123,
+    verbose=1
+)
+
+search.fit(train_df, y_train)
+best = search.best_estimator_
+</code></pre>
+
+    <h2>Feature unions &amp; custom transformers (without pain)</h2>
+    <p>
+      Combine heterogeneous feature blocks with <code>ColumnTransformer</code> or compose parallel branches via <code>FeatureUnion</code>.
+      Prefer <code>FunctionTransformer</code> or small <code>TransformerMixin</code> classes over ad-hoc lambdas so you can persist them.
+    </p>
+
+<pre><code class="language-python">from sklearn.pipeline import FeatureUnion
+from sklearn.preprocessing import FunctionTransformer
+import numpy as np
+
+def ratio_cols(df):
+    return np.c_[df["num_a"] / (df["num_b"] + 1e-6)]
+
+ratio_block = Pipeline([
+    ("get", FunctionTransformer(lambda X: X[["num_a","num_b"]], validate=False)),
+    ("ratio", FunctionTransformer(ratio_cols, validate=False)),
+])
+
+full_pre = FeatureUnion([
+    ("table", pre),
+    ("ratios", ratio_block)
+])
+
+pipe = Pipeline([("pre", full_pre), ("clf", LogisticRegression(max_iter=200))])
+</code></pre>
+
+    <h2>Evaluation that survives scrutiny</h2>
+    <ul>
+      <li>Use stratified CV; report mean &plusmn; std and the full fold breakdown.</li>
+      <li>Always include a calibration check (<code>CalibratedClassifierCV</code> or <code>isotonic</code> post-fit) when thresholds matter.</li>
+      <li>Plot gain/lift or precision-recall by threshold; pick an operating point tied to business cost.</li>
+    </ul>
+
+<pre><code class="language-python">from sklearn.calibration import CalibratedClassifierCV
+from sklearn.metrics import average_precision_score, roc_auc_score, brier_score_loss
+
+# wrap best estimator for probability calibration
+calibrated = CalibratedClassifierCV(best, method="isotonic", cv=3).fit(train_df, y_train)
+
+proba = calibrated.predict_proba(test_df)[:,1]
+print("ROC AUC", roc_auc_score(y_test, proba))
+print("PR AUC ", average_precision_score(y_test, proba))
+print("Brier  ", brier_score_loss(y_test, proba))
+</code></pre>
+
+    <h2>Reproducibility knobs</h2>
+    <ul>
+      <li>Set <code>random_state</code> everywhere (splits, models, searches).</li>
+      <li>Pin versions in <code>requirements.txt</code>; log versions to your run artifacts.</li>
+      <li>Persist the <em>entire</em> fitted pipeline, not just the estimator.</li>
+    </ul>
+
+<pre><code class="language-python">import joblib, sklearn, platform, sys, json, pathlib
+
+art = {
+  "python": sys.version,
+  "platform": platform.platform(),
+  "sklearn": sklearn.__version__,
+}
+
+pathlib.Path("artifacts").mkdir(exist_ok=True)
+with open("artifacts/run_meta.json","w") as f:
+    json.dump(art, f, indent=2)
+
+joblib.dump(best, "artifacts/model.joblib")  # best is a fitted Pipeline
+</code></pre>
+
+    <h2>Batch inference: a tiny, testable CLI</h2>
+    <p>
+      Ship a minimal command that loads the persisted pipeline, validates schema, scores in chunks, and writes outputs.
+      Keep business mapping (thresholds, segments) explicit.
+    </p>
+
+<pre><code class="language-bash"># score.py (run)
+python -m pip install -r requirements.txt
+python src/score.py --model artifacts/model.joblib --input data/scoring.parquet --output out/predictions.parquet --threshold 0.42
+</code></pre>
+
+<pre><code class="language-python"># src/score.py
+import argparse, joblib, pandas as pd, numpy as np
+from pathlib import Path
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", default="artifacts/model.joblib")
+    ap.add_argument("--input", required=True)
+    ap.add_argument("--output", required=True)
+    ap.add_argument("--threshold", type=float, default=0.5)
+    args = ap.parse_args()
+
+    pipe = joblib.load(args.model)
+
+    df = pd.read_parquet(args.input) if args.input.endswith(".parquet") else pd.read_csv(args.input)
+    proba = pipe.predict_proba(df)[:,1]
+    pred = (proba &gt;= args.threshold).astype(int)
+
+    out = pd.DataFrame({"proba": proba, "pred": pred})
+    if args.output.endswith(".parquet"):
+        out.to_parquet(args.output, index=False)
+    else:
+        out.to_csv(args.output, index=False)
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+
+    <h2>Quality gates &amp; simple data contracts</h2>
+    <p>
+      Add a pre-fit check that asserts basic schema expectations and flag drift on inference.
+      Lightweight options: Pandera or Pydantic. Here’s an inline pattern without extra deps.
+    </p>
+
+<pre><code class="language-python"># src/validate.py
+import pandas as pd
+
+REQUIRED = {
+  "age": "number",
+  "balance": "number",
+  "segment": "string",
+  "region": "string",
+}
+
+def validate(df: pd.DataFrame):
+    missing = [c for c in REQUIRED if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns: {missing}")
+
+    # very light type checks
+    for col, kind in REQUIRED.items():
+        if kind == "number" and not pd.api.types.is_numeric_dtype(df[col]):
+            raise TypeError(f"{col} must be numeric")
+</code></pre>
+
+    <h2>Common pitfalls (and how to dodge them)</h2>
+    <ol>
+      <li><strong>Target leakage via preprocessing outside the pipeline.</strong>
+        Fit imputers/encoders inside the pipeline so CV never sees the future.</li>
+      <li><strong>Different encoders at train vs. inference.</strong>
+        Use <code>handle_unknown="ignore"</code> and persist the whole pipeline.</li>
+      <li><strong>Manual feature engineering in notebooks.</strong>
+        Wrap it in a transformer so it’s versioned and re-usable.</li>
+      <li><strong>Optimizing on ROC AUC but deploying a fixed threshold.</strong>
+        Choose thresholds with PR curves / cost curves and document them.</li>
+      <li><strong>Uncontrolled randomness.</strong>
+        Set <code>random_state</code> everywhere; log seeds.</li>
+      <li><strong>Saving only the model.</strong>
+        Save the <em>pipeline</em>, not just the final estimator.</li>
+    </ol>
+
+    <h2>CI checklist (one page)</h2>
+    <ul>
+      <li>Unit tests for custom transformers (shape in/out, NaN handling).</li>
+      <li>Train on a 1k-row sample in CI to catch API breaks fast.</li>
+      <li>Fail CI on metric regression beyond a tolerance.</li>
+      <li>Artifact upload: <code>model.joblib</code>, <code>run_meta.json</code>, CV report CSV.</li>
+    </ul>
+
+    <div class="hr"></div>
+
+    <h2>Minimal project skeleton</h2>
+<pre><code class="language-none">sklearn-pipeline/
+├─ data/
+│  ├─ train.parquet
+│  └─ test.parquet
+├─ src/
+│  ├─ train.py
+│  ├─ score.py
+│  └─ validate.py
+├─ artifacts/              # created by training
+├─ tests/
+│  └─ test_transformers.py
+├─ requirements.txt
+└─ README.md
+</code></pre>
+
+    <h2>Takeaways</h2>
+    <ul>
+      <li>Wrap everything in a pipeline; make the pipeline the contract.</li>
+      <li>Tune preprocessing + model together under the same CV.</li>
+      <li>Persist one fitted object and ship a tiny scoring CLI.</li>
+      <li>Log versions and seeds; add a couple of quality gates.</li>
+    </ul>
+
+    <p>
+      That’s enough to turn “works on my notebook” into something your team can schedule, test, and trust.
+      When you outgrow this, you’ll have clean seams to plug into model tracking, feature stores, and orchestration.
+    </p>
+  </div>
+</body>
+</html>
