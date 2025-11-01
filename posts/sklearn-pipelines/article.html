@@ -140,7 +140,7 @@
     <p>
       This is a pragmatic guide for upgrading messy, exploratory scikit-learn code into
       <em>repeatable</em>, <em>leakage-aware</em>, and <em>deployment-ready</em> pipelines.
-      The goal isn’t to build a full MLOps platform&mdash;it’s to get 80% of the wins with
+      The goal isn't to build a full MLOps platform&mdash;it's to get 80% of the wins with
       clean abstractions you can test, version, and run in CI.
     </p>
 
@@ -155,14 +155,14 @@
       <li>Multiple notebooks are copy-pasting the same preprocessing steps.</li>
       <li>Metrics bounce between runs because of leakage or uncontrolled randomness.</li>
       <li>Stakeholders ask for scheduled refreshes or reproducible comparisons.</li>
-      <li>You’re hand-rolling train/test splits and hyper-params outside the model.</li>
+      <li>You're hand-rolling train/test splits and hyper-params outside the model.</li>
     </ul>
 
     <h2>When <em>not</em> to (yet)</h2>
     <ul>
-      <li>You’re still defining the problem / target / metrics. Stay in notebooks.</li>
+      <li>You're still defining the problem / target / metrics. Stay in notebooks.</li>
       <li>Your data schema churns daily. Stabilize inputs first.</li>
-      <li>The model is destined for a streaming online system—jump straight to the platform you’ll use in prod.</li>
+      <li>The model is destined for a streaming online system—jump straight to the platform you'll use in prod.</li>
     </ul>
 
     <div class="hr"></div>
@@ -369,7 +369,7 @@ if __name__ == "__main__":
     <h2>Quality gates &amp; simple data contracts</h2>
     <p>
       Add a pre-fit check that asserts basic schema expectations and flag drift on inference.
-      Lightweight options: Pandera or Pydantic. Here’s an inline pattern without extra deps.
+      Lightweight options: Pandera or Pydantic. Here's an inline pattern without extra deps.
     </p>
 
 <pre><code class="language-python"># src/validate.py
@@ -400,7 +400,7 @@ def validate(df: pd.DataFrame):
       <li><strong>Different encoders at train vs. inference.</strong>
         Use <code>handle_unknown="ignore"</code> and persist the whole pipeline.</li>
       <li><strong>Manual feature engineering in notebooks.</strong>
-        Wrap it in a transformer so it’s versioned and re-usable.</li>
+        Wrap it in a transformer so it's versioned and re-usable.</li>
       <li><strong>Optimizing on ROC AUC but deploying a fixed threshold.</strong>
         Choose thresholds with PR curves / cost curves and document them.</li>
       <li><strong>Uncontrolled randomness.</strong>
@@ -444,9 +444,14 @@ def validate(df: pd.DataFrame):
     </ul>
 
     <p>
-      That’s enough to turn “works on my notebook” into something your team can schedule, test, and trust.
-      When you outgrow this, you’ll have clean seams to plug into model tracking, feature stores, and orchestration.
+      That's enough to turn “works on my notebook” into something your team can schedule, test, and trust.
+      When you outgrow this, you'll have clean seams to plug into model tracking, feature stores, and orchestration.
     </p>
   </div>
+  <div class="container">
+<h1>From scikit-learn one-off scripts to production-ish pipelines</h1>
+<p>This writeup accompanies the demo: a real <b>Pipeline</b> with <b>ColumnTransformer</b>, sane CV, and a batch-scoring CLI.</p>
+<pre><code class="language-python"># see demo/src/train.py and demo/src/score.py for full, runnable code</code></pre>
+</div>
 </body>
 </html>
