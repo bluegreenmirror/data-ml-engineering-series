@@ -22,6 +22,16 @@
       padding: 28px 18px;
     }
 
+    .mermaid {
+      background: transparent;
+      margin: 1em 0;
+    }
+
+    .mermaid>svg {
+      max-width: 100%;
+      height: auto;
+    }
+
     h1,
     h2,
     h3 {
@@ -57,7 +67,8 @@
     }
 
     /* keep your green theme background for code blocks */
-    pre {
+    /* was: pre { ... }  -> this hit Mermaid too */
+    pre[class*="language-"] {
       background: #054212;
       color: #e5e7eb;
       padding: 14px;
@@ -66,12 +77,9 @@
       border: 1px solid #0c5c2c;
     }
 
-    pre code {
+    code[class*="language-"] {
       background: transparent;
       color: inherit;
-      padding: 0;
-      white-space: pre;
-      /* ensure Prism doesn't wrap weirdly */
     }
 
     code {
@@ -209,6 +217,11 @@
     /* Autoloader config: load only needed languages */
     Prism.plugins.autoloader.languages_path = "https://cdn.jsdelivr.net/npm/prismjs@1/components/";
   </script>
+  <!-- Mermaid -->
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, securityLevel: "loose", theme: "neutral" });
+  </script>
 </head>
 
 <body>
@@ -245,6 +258,48 @@
     <div class="hr"></div>
 
     <h2>The mental model shift</h2>
+    <div class="mermaid">
+      %%{init: {
+      "theme": "neutral",
+      "securityLevel": "loose",
+      "flowchart": { "useMaxWidth": true, "nodeSpacing": 26, "rankSpacing": 44, "curve": "linear" },
+      "themeVariables": {
+      "fontSize": "18px",
+      "primaryColor": "#ffffff",
+      "primaryTextColor": "#0b3d24",
+      "primaryBorderColor": "#0c5c2c",
+      "lineColor": "#285c91",
+      "clusterBkg": "#f5f7f2",
+      "clusterBorder": "#0c5c2c",
+      "fontFamily": "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans',sans-serif"
+      }
+      } }%%
+      flowchart TB
+      classDef step fill:#ffffff,stroke:#0c5c2c,stroke-width:1px,rx:8,ry:8,color:#0b3d24;
+      classDef gate fill:#ffffff,stroke:#285c91,stroke-width:1.5px,rx:6,ry:6,color:#0b3d24;
+
+      A["Raw Data (pandas DF)"]:::step --> B["ColumnTransformer"]:::step
+
+      subgraph B1["Numeric branch"]
+      direction TB
+      Bn1["Impute: median"]:::step --> Bn2["Scale: StandardScaler"]:::step
+      end
+
+      subgraph B2["Categorical branch"]
+      direction TB
+      Bc1["OneHotEncoder: ignore unknowns"]:::step
+      end
+
+      B --> C["Estimator: LogisticRegression"]:::step
+      C --> D{"Calibrate?"}:::gate
+      D -- "yes" --> E["CalibratedClassifierCV"]:::step
+      D -- "no" --> C
+      E --> F["Persist: model.joblib"]:::step
+      F --> G["CLI: score.py"]:::step
+      G --> H["Metrics & Plots"]:::step
+
+      linkStyle default stroke:#285c91,stroke-width:1.5px,opacity:0.9;
+    </div>
     <p>
       Instead of manual, step-by-step munging, treat the whole workflow as a single object: a
       <code>Pipeline</code> that takes raw columns and returns predictions. That object is the unit of
