@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DuckDB over Parquet for pandas users: SQL speed without a cluster</title>
+
+  <!-- Style (your green theme) -->
+  <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+        line-height: 1.6;
+        margin: 0;
+        padding: 0;
+      }
+      .container {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 28px 18px;
+      }
+      h1, h2, h3 {
+        line-height: 1.25;
+        margin-top: 1.6em;
+      }
+      h1 { font-size: 2rem; }
+      h2 { font-size: 1.5rem; }
+      h3 { font-size: 1.25rem; }
+      p  { margin: 1em 0; }
+      ul, ol { padding-left: 1.25em; }
+      code, pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+      }
+      pre {
+        background: #054212;
+        color: #e5e7eb;
+        padding: 14px;
+        overflow: auto;
+        border-radius: 8px;
+        border: 1px solid #0c5c2c;
+      }
+      pre code {
+        background: transparent;
+        color: inherit;
+        padding: 0;
+        white-space: pre;
+      }
+      code {
+        background: #edecbb;
+        color: #285c91;
+        padding: 0.2em 0.4em;
+        border-radius: 4px;
+      }
+      a { color: #0366d6; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+      th, td { border: 1px solid #eaecef; padding: 8px 10px; text-align: left; vertical-align: top; }
+      th { background: #f6f8fa; }
+      blockquote {
+        border-left: 4px solid #eaecef; margin: 1em 0; padding: 0.5em 1em;
+        color: #6a737d; background: #fafbfc;
+      }
+      .callout {
+        background: #fef3c7;
+        border: 1px solid #fde68a;
+        padding: 12px 14px;
+        border-radius: 8px;
+      }
+      .hr { height: 1px; background: #eaecef; border: 0; margin: 2em 0; }
+
+      /* Prism token tinting for the dark-green code blocks */
+      pre[class*="language-"] { background: #054212; }
+      .token.comment, .token.prolog, .token.doctype, .token.cdata { color: #9bb3a3; }
+      .token.punctuation { color: #d7e9df; }
+      .token.property, .token.tag, .token.constant, .token.symbol, .token.deleted { color: #ffcf99; }
+      .token.boolean, .token.number { color: #ffd966; }
+      .token.selector, .token.attr-name, .token.string, .token.char, .token.builtin, .token.inserted { color: #b1ffd1; }
+      .token.operator, .token.entity, .token.url { color: #e7f5ee; }
+      .token.atrule, .token.attr-value, .token.keyword { color: #7fd3ff; }
+      .token.function, .token.class-name { color: #ffd1f3; }
+      .token.regex, .token.important, .token.variable { color: #f9ffa6; }
+  </style>
+
+  <!-- Prism.js (core + autoloader) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1/themes/prism.css" />
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/autoloader/prism-autoloader.min.js"></script>
+  <script>Prism.plugins.autoloader.languages_path = "https://cdn.jsdelivr.net/npm/prismjs@1/components/";</script>
+</head>
+<body>
+  <div class="container">
+    <h1>DuckDB over Parquet for pandas users: SQL speed without a cluster</h1>
+
+    <p>
+      This is a practical migration guide for pandas users who keep datasets in <strong>Parquet</strong> and want
+      SQL-on-files speed with <strong>DuckDB</strong>—no Spark, no Presto, no data warehouse. DuckDB runs SQL
+      directly on Parquet (with projection/predicate pushdown), and hands results to Arrow/Polars/pandas cleanly.  [oai_citation:0‡DuckDB](https://duckdb.org/docs/stable/data/parquet/overview.html)
+    </p>
+
+    <div class="callout">
+      <strong>TL;DR</strong> Keep data in Parquet. Use <code>read_parquet('events/date=*/part-*.parquet')</code> with tight
+      <code>WHERE</code> and <code>SELECT</code> so DuckDB prunes files and columns; verify with <code>EXPLAIN</code>.
+      Export to Arrow/pandas only at the edges.  [oai_citation:1‡DuckDB](https://duckdb.org/docs/stable/data/parquet/overview.html)
+    </div>
+
+    <h2>When DuckDB wins (and when it doesn't)</h2>
+    <ul>
+      <li><strong>Wins:</strong> multi-file joins/aggregations on partitioned Parquet; narrow queries on wide data (projection pushdown); ad-hoc SQL + window functions on a laptop.  [oai_citation:2‡DuckDB](https://duckdb.org/docs/stable/data/parquet/overview.html)</li>
+      <li><strong>Not ideal:</strong> streaming/online paths; huge shuffles beyond RAM without careful partitioning; pipelines dominated by heavy Python UDFs.</li>
+    </ul>
+
+    <div class="hr"></div>
+
+    <h2>Quickstart (matches the demo folder)</h2>
+<pre><code class="language-bash">python -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install duckdb pandas pyarrow polars
+
+# 0) Generate synthetic Parquet partitions + a users dimension
+python scripts/generate_data.py
+
+# 1) Run SQL over Parquet with pushdown; write result
+python scripts/run_query.py --start 2025-10-01 --end 2025-10-07
+
+# 2) Optional: compare against a pandas-only baseline
+python scripts/compare_vs_pandas.py --start 2025-10-01 --end 2025-10-07
+</code></pre>
+
+    <h2>Dataset shape</h2>
+<pre><code class="language-none">data/
+├─ events/date=YYYY-MM-DD/part-XXXX.parquet   # facts: user_id, event_ts (UTC), country, revenue, cost
+└─ dim/users.parquet                           # dim: user_id, tier, region
+</code></pre>
+
+    <h2>1) Generate data (pandas + PyArrow)</h2>
+<pre><code class="language-python"># scripts/generate_data.py  (excerpt)
+#!/usr/bin/env python
+import numpy as np, pandas as pd
+from datetime import datetime, timedelta
+from pathlib import Path
+import pyarrow as pa, pyarrow.parquet as pq
+
+BASE = Path(__file__).resolve().parents[1]
+EV_DIR, DIM_DIR = BASE/"data/events", BASE/"data/dim"
+
+def write_partition(df: pd.DataFrame, date_str: str, file_idx: int):
+    path = (EV_DIR / f"date={date_str}")
+    path.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.Table.from_pandas(df, preserve_index=False),
+                   path / f"part-{file_idx:04d}.parquet")
+
+# users dim + partitioned events with UTC timestamps
+# (full file in the repo demo)
+</code></pre>
+
+    <h2>2) The core SQL (parquet scan + pushdown)</h2>
+<pre><code class="language-sql">-- sql/10_daily_fact.sql
+WITH base AS (
+  SELECT
+    user_id,
+    event_ts,
+    DATE_TRUNC('day', event_ts) AS day,
+    country,
+    (revenue - cost) AS profit
+  FROM read_parquet('data/events/date=*/part-*.parquet')
+  WHERE day BETWEEN DATE ':start_date' AND DATE ':end_date'
+    AND country = 'US'
+),
+enriched AS (
+  SELECT
+    b.user_id,
+    DATE_TRUNC('hour', b.event_ts) AS hour,
+    b.profit,
+    u.tier
+  FROM base b
+  LEFT JOIN read_parquet('data/dim/users.parquet') u USING (user_id)
+)
+SELECT hour, tier,
+       COUNT(*)    AS events,
+       SUM(profit) AS profit_sum,
+       AVG(profit) AS profit_avg
+FROM enriched
+GROUP BY hour, tier
+ORDER BY hour, tier;
+</code></pre>
+    <p>
+      DuckDB supports <em>projection pushdown</em> (only the needed columns are read) and <em>predicate pushdown</em>
+      (filters in <code>WHERE</code> are applied at the scan), which reduces I/O and memory when querying Parquet.  [oai_citation:3‡DuckDB](https://duckdb.org/docs/stable/data/parquet/overview.html)
+    </p>
+
+    <h2>3) Runner (print the plan; write Parquet)</h2>
+<pre><code class="language-python"># scripts/run_query.py  (excerpt)
+#!/usr/bin/env python
+import argparse, duckdb
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parents[1]
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--start", default="2025-10-01")
+    ap.add_argument("--end",   default="2025-10-07")
+    ap.add_argument("--out",   default=str(BASE/"out"/"daily_fact.parquet"))
+    args = ap.parse_args()
+
+    con = duckdb.connect()
+    # optional: PRAGMA threads/memory/tempdir in a bootstrap.sql
+    q = (BASE/"sql"/"10_daily_fact.sql").read_text() \
+          .replace(":start_date", args.start) \
+          .replace(":end_date",   args.end)
+
+    print("---- EXPLAIN (optimized) ----")
+    print(con.execute("EXPLAIN " + q).fetchdf().iloc[0,0])  # inspect plan
+
+    rel = con.sql(q)                                        # lazy relation
+    out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
+    rel.write_parquet(str(out), compression="zstd")
+    print(f"✅ wrote {out} with {rel.count()} rows")
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+    <p>
+      <code>EXPLAIN</code> displays the physical query plan; use it to confirm filters/columns are pushed to the scan.
+      For runtime operator timings, use <code>EXPLAIN ANALYZE</code>.  [oai_citation:4‡DuckDB](https://duckdb.org/docs/stable/guides/meta/explain.html)
+    </p>
+
+    <h2>4) Arrow -> Polars/pandas (interop at the edges)</h2>
+<pre><code class="language-python">import duckdb, polars as pl
+con = duckdb.connect()
+tbl = con.sql(q).arrow()            # DuckDB -> Arrow table
+lf  = pl.from_arrow(tbl).lazy()     # Arrow -> Polars (zero-copy for most dtypes)
+top = (lf.select(["hour","events","profit_sum"])
+         .sort("hour").head(5).collect())
+print(top)
+
+# Need pandas? .df() returns a pandas DataFrame:
+pdf = con.sql(q).df()
+</code></pre>
+    <p>
+      DuckDB can export results to <strong>Apache Arrow</strong> tables or directly to pandas.
+      Use Arrow/Polars while you're transforming, and only hop to pandas at the edge.  [oai_citation:5‡DuckDB](https://duckdb.org/docs/stable/guides/python/export_arrow.html)
+    </p>
+
+    <h2>5) Baseline parity (pandas-only)</h2>
+<pre><code class="language-python"># scripts/compare_vs_pandas.py  (excerpt)
+#!/usr/bin/env python
+import argparse, pandas as pd
+from glob import glob
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parents[1]
+ap = argparse.ArgumentParser()
+ap.add_argument("--start", default="2025-10-01")
+ap.add_argument("--end",   default="2025-10-07")
+args = ap.parse_args()
+
+parts = sorted(glob(str(BASE/"data/events/date=*/part-*.parquet")))
+# naive "pruning" by folder name
+parts = [p for p in parts if (Path(p).parent.name >= f"date={args.start}" and
+                              Path(p).parent.name <= f"date={args.end}")]
+
+df = pd.read_parquet(parts, engine="pyarrow",
+                     columns=["user_id","event_ts","country","revenue","cost"])
+df = df[df["country"] == "US"]
+df["profit"] = df["revenue"] - df["cost"]
+df["hour"] = df["event_ts"].dt.floor("H")
+
+users = pd.read_parquet(BASE/"data/dim/users.parquet", engine="pyarrow",
+                        columns=["user_id","tier","region"])
+out = (df.merge(users, on="user_id", how="left")
+         .groupby(["hour","tier"], as_index=False)
+         .agg(events=("user_id","size"),
+              profit_sum=("profit","sum"),
+              profit_avg=("profit","mean"))
+         .sort_values(["hour","tier"]))
+# writes out/daily_fact_pandas.parquet
+</code></pre>
+
+    <div class="hr"></div>
+
+    <h2>Reading many files &amp; reading from S3</h2>
+    <p>
+      DuckDB can read multiple files via <code>read_parquet</code> with globs or lists, and can access object storage
+      paths through the <code>httpfs</code> extension (S3 API).  [oai_citation:6‡DuckDB](https://duckdb.org/docs/stable/data/multiple_files/overview.html)
+    </p>
+<pre><code class="language-sql">-- multiple folders with a list:
+SELECT * FROM read_parquet(['folder1/*.parquet', 'folder2/*.parquet']);
+
+-- S3 (enable httpfs extension first in your environment):
+SELECT * FROM read_parquet('s3://bucket/path/date=*/part-*.parquet') WHERE date BETWEEN '2025-10-01' AND '2025-10-07';
+</code></pre>
+
+    <h2>Why Parquet makes this fast</h2>
+    <p>
+      Parquet is a columnar format: files are organized into row groups and column chunks, with metadata/statistics
+      (e.g., min/max) that let engines skip irrelevant chunks and read only referenced columns—exactly what pushdown uses.  [oai_citation:7‡Apache Parquet](https://parquet.apache.org/docs/concepts/)
+    </p>
+
+    <h2>Performance discipline</h2>
+    <ul>
+      <li><strong>Filter early, select narrowly.</strong> Let the scan do the work; confirm with <code>EXPLAIN</code>.  [oai_citation:8‡DuckDB](https://duckdb.org/docs/stable/guides/meta/explain.html)</li>
+      <li><strong>Partition by query keys</strong> (e.g., <code>date=/region=</code>) so predicates prune whole directories/files.  [oai_citation:9‡DuckDB](https://duckdb.org/docs/stable/data/multiple_files/overview.html)</li>
+      <li><strong>Small dims, big facts.</strong> Keep the right-hand side of joins tiny; pushdown still applies.  [oai_citation:10‡DuckDB](https://duckdb.org/docs/stable/data/parquet/overview.html)</li>
+      <li><strong>Interop at edges.</strong> Export Arrow/pandas only when needed.  [oai_citation:11‡DuckDB](https://duckdb.org/docs/stable/guides/python/export_arrow.html)</li>
+    </ul>
+
+    <h2>Common pitfalls</h2>
+    <ol>
+      <li>Globbing too widely (no pruning) -> tighten <code>WHERE</code> on partition keys or pass an explicit list.  [oai_citation:12‡DuckDB](https://duckdb.org/docs/stable/data/multiple_files/overview.html)</li>
+      <li>Selecting every column “just in case” -> projection pushdown can't help you if you ask for everything.  [oai_citation:13‡DuckDB](https://duckdb.org/docs/stable/data/parquet/overview.html)</li>
+      <li>Timezone weirdness -> store event timestamps in UTC; convert at presentation time.</li>
+      <li>Currency as float -> prefer integer cents or DECIMAL in DuckDB. (Avoid accumulated rounding error.)</li>
+    </ol>
+
+    <div class="hr"></div>
+
+    <h2>Appendix: sanity-check pushdown</h2>
+<pre><code class="language-sql">EXPLAIN
+WITH base AS (
+  SELECT user_id, event_ts, DATE_TRUNC('day', event_ts) AS day, country, (revenue - cost) AS profit
+  FROM read_parquet('data/events/date=*/part-*.parquet')
+  WHERE day BETWEEN DATE '2025-10-01' AND DATE '2025-10-07' AND country = 'US'
+)
+SELECT COUNT(*) FROM base;</code></pre>
+    <p>
+      Look for a scan node that lists only selected columns and shows the pushed-down filter. For per-operator timings, use
+      <code>EXPLAIN ANALYZE</code>.  [oai_citation:14‡DuckDB](https://duckdb.org/docs/stable/guides/meta/explain.html)
+    </p>
+
+    <p>
+      That's it—SQL speed over Parquet, clean interop, and easy portability from laptop to S3 paths. Keep the data columnar,
+      keep the plan lazy, and measure with <code>EXPLAIN</code>/<code>EXPLAIN ANALYZE</code>.  [oai_citation:15‡DuckDB](https://duckdb.org/docs/stable/core_extensions/httpfs/s3api.html)
+    </p>
+  </div>
+</body>
+</html>

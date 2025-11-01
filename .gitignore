@@ -25,3 +25,4 @@ venv/
 **/artifacts/
 **/out/
 **/.duckdbtmp/
+posts/duckdb-lakehouse/data/*
